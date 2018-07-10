@@ -18,13 +18,14 @@ use hbui::hbbft::{
     },
     messaging::{DistAlgorithm, NetworkInfo, SourcedMessage, Target},
     honey_badger::HoneyBadger,
-    dynamic_honey_badger::{Error as DhbError, DynamicHoneyBadger, Input, Batch, Message, Change},
+    dynamic_honey_badger::{Error as DhbError, Message, Change},
+    queueing_honey_badger::{Error as QhbError, QueueingHoneyBadger, Batch, Input},
 };
 use hbui::{Hbui, /*ContribQueue*/};
 
 const BATCH_SIZE: usize = 50;
 const NODE_COUNT: usize = 20;
-const TXN_START_COUNT: usize = 100;
+const TXN_START_COUNT: usize = 1000;
 const TXN_BYTES: usize = 15;
 
 
@@ -45,12 +46,13 @@ struct TestNode {
 
 
 
-fn main() -> Result<(), DhbError> {
+fn main() -> Result<(), QhbError> {
     let sk_set = SecretKeySet::random(0, &mut rand::thread_rng());
     let pk_set = sk_set.public_keys();
 
     let node_ids: BTreeSet<_> = (0..NODE_COUNT).collect();
 
+    // Create HB Test nodes with user transactions input:
     let mut nodes = (0..NODE_COUNT).map(|id| {
             let netinfo = NetworkInfo::new(
                 id,
@@ -59,9 +61,9 @@ fn main() -> Result<(), DhbError> {
                 pk_set.clone(),
             );
 
-            let dhb = DynamicHoneyBadger::builder(netinfo)
+            let dhb = QueueingHoneyBadger::builder(netinfo)
                 .max_future_epochs(0)
-                .build()?;
+                .build();
 
             let mut hb = Hbui::new(dhb);
 
@@ -73,7 +75,20 @@ fn main() -> Result<(), DhbError> {
                 hb,
             })
         })
-        .collect::<Result<Vec<_>, DhbError>>()?;
+        .collect::<Result<Vec<_>, QhbError>>()?;
+
+    // Stage messages and transactions for output and processing.
+    for node in nodes.iter_mut() {
+        node.hb.enqueue_outputs();
+    }
+
+    // Exchange messages
+    for node_idx in 0..nodes.len() {
+
+    }
+
+
+
 
     Ok(())
 }
