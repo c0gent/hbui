@@ -28,18 +28,17 @@ use serde::{Serialize, Deserialize};
 use hbbft::{
     dynamic_honey_badger::{Error as DhbError, DynamicHoneyBadger, Message},
     queueing_honey_badger::{Error as QhbError, QueueingHoneyBadger, Batch, Input},
-    // traits::{Contribution, NodeUid},
     messaging::{DistAlgorithm, TargetedMessage},
     fault_log::FaultLog,
 };
 use traits::{Contribution, NodeUid};
 
 
+/// An easy-to-use API for the honey badger consensus algorithm.
 pub struct Hbui<C, N>
         where C: Contribution + Serialize + for<'r> Deserialize<'r>,
               N: NodeUid + Serialize + for<'r> Deserialize<'r> {
     pub qhb: QueueingHoneyBadger<C, N>,
-    // pub peer_in_queue: VecDeque<C>,
     pub peer_out_queue: VecDeque<TargetedMessage<Message<N>, N>>,
     pub batch_out_queue: VecDeque<Batch<C, N>>,
 }
@@ -50,7 +49,6 @@ impl<C, N> Hbui<C, N>
     pub fn new(qhb: QueueingHoneyBadger<C, N>) -> Hbui<C, N> {
         Hbui {
             qhb,
-            // peer_in_queue: VecDeque::new(),
             peer_out_queue: VecDeque::new(),
             batch_out_queue: VecDeque::new(),
         }
@@ -70,6 +68,36 @@ impl<C, N> Hbui<C, N>
         for txn in self.qhb.output_iter() {
             self.batch_out_queue.push_back(txn);
         }
+    }
+
+    /// Returns a shared reference to the internal honey badger instance.
+    pub fn hb(&self) -> &QueueingHoneyBadger<C, N> {
+        &self.qhb
+    }
+
+    /// Returns a unique reference to the internal honey badger instance.
+    pub fn hb_mut(&mut self) -> &mut QueueingHoneyBadger<C, N> {
+        &mut self.qhb
+    }
+
+    /// Returns a reference to the peer node network output queue.
+    pub fn peer_out_queue(&self) -> &VecDeque<TargetedMessage<Message<N>, N>> {
+        &self.peer_out_queue
+    }
+
+    /// Returns a reference to the peer node network output queue.
+    pub fn peer_out_queue_mut(&mut self) -> &mut VecDeque<TargetedMessage<Message<N>, N>> {
+        &mut self.peer_out_queue
+    }
+
+    /// Returns a reference to the batch (post-consensus) output queue.
+    pub fn batch_out_queue(&self) -> &VecDeque<Batch<C, N>> {
+        &self.batch_out_queue
+    }
+
+    /// Returns a reference to the batch (post-consensus) output queue.
+    pub fn batch_out_queue_mut(&mut self) -> &mut VecDeque<Batch<C, N>> {
+        &mut self.batch_out_queue
     }
 }
 

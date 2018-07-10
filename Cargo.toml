@@ -11,12 +11,12 @@ rand = "0.4.2"
 [dependencies.hbbft]
 version = "*"
 
-git = "https://github.com/poanetwork/hbbft"
-branch = "afck-queue"
+# git = "https://github.com/poanetwork/hbbft"
+# branch = "afck-queue"
 
 # git = "https://github.com/c0gent/hbbft"
 # branch = "c0gent-queue-experiments"
 
-# path = "../hbbft"
+path = "../hbbft"
 
 # features = ["serialization-protobuf"]
