@@ -18,10 +18,10 @@ use hbui::hbbft::{
     },
     messaging::{DistAlgorithm, NetworkInfo, SourcedMessage, Target, TargetedMessage},
     honey_badger::HoneyBadger,
-    dynamic_honey_badger::{Error as DhbError, Message, Change},
-    queueing_honey_badger::{Error as QhbError, QueueingHoneyBadger, Batch, Input},
+    dynamic_honey_badger::{Error as HbError, DynamicHoneyBadger, Batch, Input, Message, Change},
+    // queueing_honey_badger::{Error as HbError, QueueingHoneyBadger, Batch, Input},
 };
-use hbui::{Hbui, /*ContribQueue*/};
+use hbui::{Hbui};
 
 const BATCH_SIZE: usize = 150;
 const NODE_COUNT: usize = 20;
@@ -43,7 +43,7 @@ impl Transaction {
 /// A Honeybadger test node.
 struct TestNode {
     uid: usize,
-    hb: QueueingHoneyBadger<Transaction, usize>,
+    hb: DynamicHoneyBadger<Vec<Transaction>, usize>,
     peer_in_queue: VecDeque<(usize, TargetedMessage<Message<usize>, usize>)>,
     peer_out_queue: VecDeque<TargetedMessage<Message<usize>, usize>>,
     batch_out_queue: VecDeque<Batch<Transaction, usize>>,
@@ -71,14 +71,12 @@ impl TestNode {
             None => Err(()),
         }
     }
-
-    // fn complete
 }
 
 
 /// Given a `Vec` of `TestNodes`, iterate through the list, collect all
 /// outgoing messages, then forward messages to the appropriate recipient(s).
-fn forward_outgoing_messages(nodes: &mut Vec<TestNode>) -> Result<(), QhbError> {
+fn forward_outgoing_messages(nodes: &mut Vec<TestNode>) -> Result<(), HbError> {
     // All peer-to-peer messages for this round:
     let mut peer_output_msgs: Vec<_> = nodes.iter_mut().flat_map(|node| {
             let node_uid = node.uid;
@@ -90,13 +88,10 @@ fn forward_outgoing_messages(nodes: &mut Vec<TestNode>) -> Result<(), QhbError> 
     for (src_node_idx, peer_msg) in peer_output_msgs.drain(..) {
         match peer_msg.target {
             Target::Node(n_uid) => {
-                // nodes[n_uid].hb.handle_message(&src_node_idx, peer_msg.message)?;
                 nodes[n_uid].peer_in_queue.push_back((src_node_idx, peer_msg));
             },
             Target::All => {
                 for n_uid in (0..NODE_COUNT).filter(|&id| id != src_node_idx) {
-                    // nodes[n_uid].hb.handle_message(&src_node_idx,
-                    //     peer_msg.message.clone())?;
                     nodes[n_uid].peer_in_queue.push_back((src_node_idx, peer_msg.clone()));
                 }
             },
@@ -105,14 +100,18 @@ fn forward_outgoing_messages(nodes: &mut Vec<TestNode>) -> Result<(), QhbError> 
     Ok(())
 }
 
+//
+// current public key set, set of node ids
+// buffer all messages
+// epoch number from changed
+// SecretKey::rand
 
-fn main() -> Result<(), QhbError> {
+
+fn main() -> Result<(), HbError> {
     let sk_set = SecretKeySet::random(0, &mut rand::thread_rng());
     let pk_set = sk_set.public_keys();
 
     let node_ids: BTreeSet<_> = (0..NODE_COUNT).collect();
-
-    let txns = (0..TXN_COUNT).map(|_| Transaction::random(TXN_BYTES));
 
     // Create HB Test nodes with user transactions input:
     let mut nodes = (0..NODE_COUNT).map(|id| {
@@ -123,17 +122,7 @@ fn main() -> Result<(), QhbError> {
                 pk_set.clone(),
             );
 
-            let hb = QueueingHoneyBadger::builder(netinfo)
-                // .max_future_epochs(0)
-                .batch_size(BATCH_SIZE)
-                // .build();
-                .build_with_transactions(txns.clone())?;
-
-            ////// KEEPME (compare v. `::build_with_transactions`):
-            // for _ in 0..TXN_COUNT {
-            //     hbui.append_transaction(Transaction::random(TXN_BYTES))?;
-            // }
-            //////
+            let hb = DynamicHoneyBadger::builder(netinfo).build();
 
             Ok(TestNode {
                 uid: id,
@@ -143,27 +132,20 @@ fn main() -> Result<(), QhbError> {
                 batch_out_queue: VecDeque::new(),
             })
         })
-        .collect::<Result<Vec<_>, QhbError>>()?;
+        .collect::<Result<Vec<_>, HbError>>()?;
+
+    let txns = (0..TXN_COUNT).map(|_| Transaction::random(TXN_BYTES)).collect::<Vec<_>>();
 
     // Stage messages and transactions for output and processing:
     for node in nodes.iter_mut() {
+        for txn in txns.iter() {
+            // node.hb.input(Input::User(txn.clone()))?;
+        }
+        node.hb.input(Input::User(txns.clone()))?;
         node.enqueue_outputs();
     }
 
     forward_outgoing_messages(&mut nodes)?;
-
-    // struct NodesComplete([bool; NODE_COUNT]);
-
-    // impl NodesComplete {
-    //     fn all_nodes_complete(&self) -> bool {
-    //         for n_idx in 0..NODE_COUNT {
-    //             if !self.0[n_idx] { return false }
-    //         }
-    //         true
-    //     }
-    // }
-
-    // let mut nodes_complete = NodesComplete([false; NODE_COUNT]);
 
     let epoch_ttl = TXN_COUNT / BATCH_SIZE;
     let mut epochs_done = 0;
@@ -174,19 +156,15 @@ fn main() -> Result<(), QhbError> {
             for node_idx in 0..NODE_COUNT {
                 if let Err(_) = nodes[node_idx].handle_next_message() {
                     // Incoming message queue is empty.
-                    println!("Incoming message queue is empty for node: {}", node_idx);
-                    // break;
-                    // nodes_complete.0[node_idx] = true;
+                    // println!("Incoming message queue is empty for node: {}", node_idx);
                 }
 
-                // forward_outgoing_messages(&mut nodes)?;
                 nodes[node_idx].enqueue_outputs();
                 forward_outgoing_messages(&mut nodes)?;
 
                 if nodes[node_idx].batch_out_queue.len() > epochs_done {
                     // println!("First batch [{}]: {:?}", node_idx, nodes[node_idx].batch_out_queue);
                     batch_done = true;
-                    // break;
                 }
             }
         }
@@ -220,22 +198,3 @@ fn main() -> Result<(), QhbError> {
 
 
 
-
-
-
-
-
-// struct Queue {
-//     queue: VecDeque<String>,
-// }
-
-// impl Queue {
-//     pub fn new() -> Queue {
-//         Queue { queue: VecDeque::new() }
-//     }
-// }
-
-// impl ContribQueue for Queue {
-//     type Contribution = String;
-
-// }
